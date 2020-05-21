@@ -15,3 +15,5 @@ It has the following (mis)features:
 * It inlines all strategies that are called only once
 * It does some local optimisations
 * It does not have a parser, so you have to write down the AST
+* It does not have error checking, so it's garbage in - garbage out
+* It has been tested on a single example
