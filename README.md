@@ -1,8 +1,8 @@
 # Mini Stratego compiler
 
 This compiler supports a minuscule subset of Stratego:
-* Rules parameterised by strategies & all: `bottomup(s) = all(bottomup(s)); s`
-* Conditionals: `a < b + c`, `id`, `fail`
+* Conditionals `a < b + c`, `id`, `fail`, and `all`
+* Rules parameterised by strategies: `bottomup(s) = all(bottomup(s)); s`
 * Term construction and strategy application `!Add(<s> Succ(x),y)`
 * Pattern matching: `Add(Succ(x),y) -> ...` 
 
