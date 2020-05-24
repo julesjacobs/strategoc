@@ -15,5 +15,18 @@
     <orderEntry type="library" name="sbt: com.lihaoyi:pprint_2.13:0.5.6:jar" level="project" />
     <orderEntry type="library" name="sbt: com.lihaoyi:sourcecode_2.13:0.1.8:jar" level="project" />
     <orderEntry type="library" name="sbt: org.scala-lang:scala-library:2.13.2:jar" level="project" />
+    <orderEntry type="module-library">
+      <library>
+        <CLASSES>
+          <root url="file://$MODULE_DIR$/../.." />
+        </CLASSES>
+        <JAVADOC />
+        <SOURCES>
+          <root url="file://$MODULE_DIR$/../.." />
+          <root url="file://$MODULE_DIR$/../../src/main/scala" />
+        </SOURCES>
+        <jarDirectory url="file://$MODULE_DIR$/../.." recursive="false" />
+      </library>
+    </orderEntry>
   </component>
 </module>

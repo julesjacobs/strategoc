@@ -92,6 +92,38 @@ object compiler {
       }, Fail()))))
   }
 
+  def desugarNorm(p: Program): Program = {
+    // add extra strategy argument to each rule
+    // main transformed with Id()
+    // this doesn't work, we need to actually create a recursive strategy
+    val newrules = new collection.mutable.HashMap[String, (List[String], Strat)]
+    def iter(s: Strat, norm: Strat): Strat = s match {
+      case Id() | Fail() | SVar(_) => s
+      case If(a, b, c) => If(iter(a,norm), iter(b,norm), iter(c,norm))
+      case Call(name, args) => Call(name, args.map(iter(_,norm)) :+ norm)
+      case Match(branches, a) =>
+        Match(branches.map{case (t,b) => (t, iter(b,norm))}, iter(a,norm))
+      case Put(t) => Put(iterT(t,norm))
+      case Norm(Call(name, List()), a) =>
+        val rulename = gensym()
+        newrules(rulename) = (List(),Call(name, List(Call(rulename,List()))))
+        iter(a, Call(rulename,List()))
+    }
+
+    def iterT(x: Term, norm: Strat): Term = x match {
+      case Constr(name, args) => Apply(norm, Constr(name, args.map(iterT(_,norm))))
+      case Var(_) => x
+      case Apply(a, t) => Apply(iter(a,norm), iterT(t,norm))
+    }
+
+    val rules = new collection.mutable.HashMap[String, (List[String], Strat)]()
+    for((n,(args,s)) <- p){
+      if(n == "main") rules("main") = (args, iter(s,Id()))
+      else rules(n) = (args :+ "norm", iter(s,SVar("norm")))
+    }
+    rules.toMap ++ newrules
+  }
+
   var lastvar = 0
 
   def gensym(): String = {
@@ -106,7 +138,7 @@ object compiler {
     def compile(s: Strat): Strat = {
       s match {
         case SVar(_) => s
-        case Call(_, _) => elimCalls(s)
+//        case Call(_, _) => elimCalls(s)
         case s =>
           if (!ruleNames.contains(s)) {
             val v = gensym()
@@ -319,11 +351,9 @@ object compiler {
     }
     def block(f: String => Unit):Unit ={
       val label = gensym()
-      outln(label + ":")
-      indent("do", {
+      indentln(s"$label: ", {
         f(s"break $label;")
       })
-      out ++= "while(false);\n"
     }
     def break(label: String): String ={
       outln(label)
@@ -365,19 +395,30 @@ object compiler {
         case Case(name, constrName, argNames, a, b) =>
           val x = gensym()
           outln(s"Term $x = null;")
-          indentln(s"if($name instanceof $constrName)", {
-            val n = gensym()
-            outln(s"$constrName $n = ($constrName)$name;")
-            for((an,i) <- argNames.zipWithIndex){
-              outln(s"Term $an = $n.f$i;")
-            }
-            val r = gen(a, in, fail)
-            outln(s"$x = $r;")
-          })
-          indentln("else",{
+          if(argNames.isEmpty && zeroArgConstrOpt && matchRefEqOpt){
+            indent(s"if($name == ${constrName.toLowerCase})", {
+              val r = gen(a, in, fail)
+              outln(s"$x = $r;")
+            })
+            out ++= "else{\n"
             val r = gen(b, in, fail)
             if(r != "null") outln(s"$x = $r;")
-          })
+            outln("}")
+          }else{
+            indent(s"if($name instanceof $constrName)", {
+              val n = gensym()
+              outln(s"$constrName $n = ($constrName)$name;")
+              for((an,i) <- argNames.zipWithIndex){
+                outln(s"Term $an = $n.f$i;")
+              }
+              val r = gen(a, in, fail)
+              outln(s"$x = $r;")
+            })
+            out ++= "else{\n"
+            val r = gen(b, in, fail)
+            if(r != "null") outln(s"$x = $r;")
+            outln("}")
+          }
           x
       }
     }
@@ -386,7 +427,8 @@ object compiler {
       t match {
         case Constr(name,args) =>
           constrs += ((name,args.length))
-          val ys = args.map{s => genT(s, fail)}
+          if(args.isEmpty && zeroArgConstrOpt) return name.toLowerCase
+          val ys = args.map { s => genT(s, fail) }
           val r = gensym()
           outln(s"Term $r = new $name(${ys.mkString(",")});")
           r
@@ -403,6 +445,22 @@ object compiler {
           val ret = gen(s, "it", "return null;")
           outln(s"return $ret;")
         })
+      }
+      indentln("public static void main(String args[])", {
+        indentln("for(int i=0; i<10; i++)", {
+          outln("System.out.println(\"Started...\");");
+          outln("long startTime = System.currentTimeMillis();")
+          outln("main((Term)null);")
+          outln("long endTime = System.currentTimeMillis();")
+          outln("System.out.println(\"Total execution time: \" + (endTime - startTime) + \"ms\");");
+          if(showresult){
+            outln("main((Term)null).print();")
+            outln("System.out.println();")
+          }
+        })
+      })
+      for((constr,n) <- constrs) if(n==0 && zeroArgConstrOpt) {
+        outln(s"static final Term ${constr.toLowerCase} = new $constr();")
       }
     })
 
@@ -430,12 +488,15 @@ object compiler {
     val outp:String = out.toString
 
     import java.io.PrintWriter
-    new PrintWriter("Rewriter.java") { write(outp); close() }
+    new PrintWriter("/Users/jules/IdeaProjects/strategoc/src/main/scala/Rewriter.java") { write(outp); close() }
     ""
   }
 
 //  norm
 //  match-constructor
+  val zeroArgConstrOpt = true
+  val matchRefEqOpt = true
+  val showresult = false
 
   def main(args: Array[String]): Unit = {
     def tryS(a: Strat) = a +> Id()
@@ -456,6 +517,8 @@ object compiler {
 
     def mul(a: Term, b: Term) = Constr("Mul", List(a, b))
 
+    def pow(a: Term, b: Term) = Constr("Pow", List(a, b))
+
     def num(n: Int) = {
       var t = zero
       for (_ <- 0 until n) t = suc(t)
@@ -474,21 +537,37 @@ object compiler {
         mul(x, suc(y)) -> Put(add(x, mul(x, y))),
         mul(add(x, y), z) -> Put(add(mul(x, z), mul(y, z))),
         mul(z, add(x, y)) -> Put(add(mul(x, z), mul(y, z))),
-        mul(mul(x, y), z) -> Put(mul(x, mul(y, z)))
-      ), Fail()))),
-      "bottomup" -> ((List("s"), allS(bottomupS(s)) %> s)),
-      "innermost" -> ((List("s"), bottomupS(tryS(s %> innermostS(s))))),
-      "main" -> ((List(), Put(mul(add(num(1), xx), add(xx, num(2)))) %> innermostS(Call("simpl", List()))))
+        mul(mul(x, y), z) -> Put(mul(x, mul(y, z))),
+        pow(x, suc(y)) -> Put(mul(x, pow(x,y))),
+        pow(x, zero) -> Put(num(1))
+      ), Id()))),
+      "copy" -> ((List(), allS(Call("copy",List())))),
+      "main" -> ((List(), Put(pow(add(num(1),xx), num(18))) %> Norm(Call("simpl",List()), Call("copy",List()))))
+//      "bottomup" -> ((List("s"), allS(bottomupS(s)) %> s)),
+//      "innermost" -> ((List("s"), bottomupS(tryS(s %> innermostS(s))))),
+//      "main" -> ((List(), Put(pow(add(num(1),xx), num(2))) %> innermostS(Call("simpl", List()))))
     )
+
+    // vs Stratego: 23
+    //Pow(Add(Suc(Zero),X), Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Suc(Zero))))))))))))))))))))))));
+    //Total execution time: 7447ms
+
+    // Mini Stratego: Total execution time: 47190ms
+
+
     val desugaredAll = desugarAll(example)
-    val desugaredCall = desugarCall(desugaredAll)
+    val desugaredNorm = desugarNorm(desugaredAll)
+//    val desugaredNorm = desugaredAll
+    val desugaredCall = desugarCall(desugaredNorm)
     val desugaredMatch = desugarMatch(desugaredCall)
     val inlined = inline(desugaredMatch)
-//    pprint.pprintln(desugaredCall)
+    pprint.pprintln(desugaredCall)
+
+    //    pprint.pprintln(desugaredCall)
 //    pprint.pprintln(inlined)
     codegen(inlined)
+//    Rewriter.main(List("").toArray)
 //    print(Rewriter.main(null))
 //    println("-")
-    Rewriter.main(null).print()
   }
 }

@@ -1,0 +1,31 @@
+module testmyinnermost.testmyinnermost
+imports libstrategolib
+signature
+  sorts Prop
+  constructors
+    X : Prop
+    Zero : Prop
+    Suc : Prop -> Prop
+    Add : Prop * Prop -> Prop
+    Mul : Prop * Prop -> Prop
+    Pow : Prop * Prop -> Prop
+rules
+    E : Add(Zero(), x) -> x
+    E : Add(x,Zero()) -> x
+    E : Mul(Zero(),x) -> Zero()
+    E : Mul(x,Zero()) -> Zero()
+    E : Add(Suc(x), y) -> Suc(Add(x, y))
+    E : Add(x, Suc(y)) -> Suc(Add(x, y))
+    E : Mul(Suc(x), y) -> Add(Mul(x, y), y)
+    E : Mul(x, Suc(y)) -> Add(x, Mul(x, y))
+    E : Mul(Add(x, y), z) -> Add(Mul(x, z), Mul(y, z))
+    E : Mul(z, Add(x, y)) -> Add(Mul(x, z), Mul(y, z))
+    E : Mul(Mul(x, y), z) -> Mul(x, Mul(y, z))
+    E : Pow(x, Suc(y)) -> Mul(x, Pow(x,y))
+    E : Pow(x, Zero()) -> Suc(Zero())
+strategies
+  mytry(s) = s +> id
+  mybottomup(s) = all(bottomup(s)) ; s
+  myinnermost(s) = bottomup(try(s ; innermost(s)))
+  main = io-wrap(eval)
+  eval = innermost(E)
